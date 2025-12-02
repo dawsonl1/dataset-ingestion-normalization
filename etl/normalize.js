@@ -64,6 +64,31 @@ function normalizePhone(value) {
   return digits === '' ? null : digits;
 }
 
+async function auditDrop(knex, row, reason) {
+  if (!row || !row.rowid) return;
+
+  try {
+    await knex('normalization_audit').insert({
+      rowid: row.rowid,
+      reason,
+      participantemail: row.participantemail,
+      participantfirstname: row.participantfirstname,
+      participantlastname: row.participantlastname,
+      participantdob: row.participantdob,
+      participantrole: row.participantrole,
+      participantphone: row.participantphone,
+      participantcity: row.participantcity,
+      participantstate: row.participantstate,
+      participantzip: row.participantzip,
+      participantschooloremployer: row.participantschooloremployer,
+      participantfieldofinterest: row.participantfieldofinterest,
+    });
+    console.log('[normalize][audit] Logged dropped/partial row', { rowid: row.rowid, reason });
+  } catch (auditErr) {
+    console.error('[normalize][audit] Failed to insert normalization_audit row', { rowid: row.rowid, reason, error: auditErr });
+  }
+}
+
 async function getOrCreateParticipant(knex, row) {
   const email = toNullIfBlank(row.participantemail);
   if (!email) return null;
@@ -353,6 +378,15 @@ async function createDonationsIfNeeded(knex, participantId, row) {
 
 async function runNormalization(knex) {
   console.log('--- Normalization run started ---');
+
+  // Clear any previous audit entries so each upload run has a fresh audit set
+  try {
+    console.log('[normalize] Truncating normalization_audit (start of run)');
+    await knex('normalization_audit').truncate();
+  } catch (err) {
+    console.error('[normalize] Failed to truncate normalization_audit', err);
+  }
+
   const rows = await knex('stagingrawsurvey').select('*');
   console.log('[normalize] Loaded rows from stagingrawsurvey', { rowCount: rows.length });
 
@@ -363,6 +397,10 @@ async function runNormalization(knex) {
     const hasParticipantEmail = toNullIfBlank(row.participantemail);
     if (!hasParticipantEmail) {
       // Skip full normalization for this row
+      // Before skipping, write an audit record so we know why it was dropped
+      // eslint-disable-next-line no-await-in-loop
+      await auditDrop(knex, row, 'missing participantemail');
+
       // eslint-disable-next-line no-continue
       skippedNoEmail += 1;
       console.log('[normalize] Skipping row with missing participantemail', { rowid: row.rowid });
@@ -390,6 +428,11 @@ async function runNormalization(knex) {
       // eslint-disable-next-line no-await-in-loop
       await createSurveyIfNeeded(knex, attendanceId, row);
     } else {
+      const reason = !eventName
+        ? 'missing eventname (skipped event/attendance/survey)'
+        : 'missing or invalid eventdatetimestart (skipped event/attendance/survey)';
+      // eslint-disable-next-line no-await-in-loop
+      await auditDrop(knex, row, reason);
       console.log('[normalize] Skipping event/attendance/survey for row due to missing event data', {
         rowid: row.rowid,
         eventName,

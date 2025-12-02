@@ -1,0 +1,120 @@
+Drop Audit Implementation Plan
+
+1. Objective
+Create a transparent, reliable system to track which rows from the staging table are dropped during normalization and why. This system must allow developers to confirm drop behavior, analyze reasons for missing data, and debug normalization logic with full access to participant-level fields.
+
+2. Required Components
+- A dedicated SQL audit table: normalization_audit
+- Integration in the Node.js normalization script to insert audit entries when a row is dropped
+- SQL QA queries to compare expected vs. actual drop behavior
+- Branch-based development workflow
+
+3. normalization_audit Table Structure
+
+Use this exact SQL definition:
+
+create table normalization_audit (
+    auditid       serial primary key,
+    rowid         int not null,
+    reason        text not null,
+
+    participantemail            text,
+    participantfirstname        text,
+    participantlastname         text,
+    participantdob              text,
+    participantrole             text,
+    participantphone            text,
+    participantcity             text,
+    participantstate            text,
+    participantzip              text,
+    participantschooloremployer text,
+    participantfieldofinterest  text,
+
+    logged_at timestamp not null default now()
+);
+
+Field Explanation:
+- rowid: primary identifier of the original staging row
+- reason: exact drop explanation (ex: "missing participantemail")
+- participant fields: snapshot of all participantinfo-relevant columns for analysis
+- logged_at: timestamp when drop occurred
+
+4. Changes to Normalization Process
+- Detect drop conditions early (ex: missing required participant fields)
+- Before skipping a row, insert an audit record using all participant fields
+- Ensure each dropped row generates exactly one audit entry
+- Do not allow successful normalization rows to create audit entries
+- Maintain consistent naming for drop reasons
+
+5. Node.js Integration
+- Add an audit insert inside each drop condition
+- Example insert pattern:
+
+await db.query(
+  `insert into normalization_audit (
+      rowid, reason,
+      participantemail, participantfirstname, participantlastname,
+      participantdob, participantrole, participantphone,
+      participantcity, participantstate, participantzip,
+      participantschooloremployer, participantfieldofinterest
+   ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)` ,
+  [
+    row.rowid,
+    "missing participantemail",
+    row.participantemail,
+    row.participantfirstname,
+    row.participantlastname,
+    row.participantdob,
+    row.participantrole,
+    row.participantphone,
+    row.participantcity,
+    row.participantstate,
+    row.participantzip,
+    row.participantschooloremployer,
+    row.participantfieldofinterest
+  ]
+);
+
+- Wrap inserts in try/catch for stable error logging
+- Add optional console logging during early testing
+
+6. Validation Queries
+
+Count comparison:
+select count(*) from stagingrawsurvey;
+select count(*) from participantinfo;
+select count(*) from normalization_audit;
+
+Retrieve all audit rows:
+select * from normalization_audit;
+
+Anti-join to find staging rows not normalized or audited:
+select s.rowid
+from stagingrawsurvey s
+left join participantinfo p on p.participantemail = s.participantemail
+left join normalization_audit a on a.rowid = s.rowid
+where p.participantemail is null and a.rowid is null;
+
+7. Developer Workflow
+- Create development branch add-drop-audit-table
+- Implement audit table creation and Node.js changes
+- Test locally with small test CSVs including missing and complete rows
+- Push changes and open Pull Request into main
+
+8. Testing Plan
+- Build controlled datasets with:
+  - missing emails
+  - missing participant names
+  - participants with partial data
+  - fully valid rows
+- Confirm only invalid rows generate audit entries
+- Confirm valid rows do not appear in audit table
+- Verify audit fields match original staging data
+
+9. Deployment & Maintenance
+- After thorough validation, merge into main
+- Document all drop rules in repository documentation
+- Keep reason strings standardized for future analytics
+- Review audit table periodically to refine drop logic
+
+End of plan.
