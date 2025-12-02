@@ -1,0 +1,696 @@
+First, create the database:
+
+    create database ella_rises;
+
+    \c ella_rises
+
+    create table participantinfo (
+        participantid               serial primary key,
+        participantemail            varchar(150),
+        participantfirstname        varchar(50),
+        participantlastname         varchar(50),
+        participantdob              date,
+        participantrole             varchar(20),
+        participantphone            int,
+        participantcity             varchar(80),
+        participantstate            varchar(2),
+        participantzip              varchar(10),
+        participantschooloremployer varchar(100),
+        participantfieldofinterest  varchar(50)
+    );
+
+    create table participantdonations (
+        donationid      serial primary key,
+        participantid   int references participantinfo(participantid),
+        donationno      int,
+        donationdate    date,
+        donationamount  numeric(10,2)
+    );
+
+    create table participantmilestones (
+        participantmilestoneid  serial primary key,
+        participantid           int references participantinfo(participantid),
+        milestoneno             int,
+        milestonetitle          varchar(100),
+        milestonedate           date
+    );
+
+    create table eventtypes (
+        eventname                varchar(50) primary key,
+        eventtype                varchar(50),
+        eventdescription         varchar(300),
+        eventrecourrancepatter   varchar(50),
+        eventdefaultcapacity     int
+    );
+
+    create table eventinstances (
+        instanceid         serial primary key,
+        eventname          varchar(50) references eventtypes(eventname),
+        eventdatetimestart timestamp,
+        eventdatetimeend   timestamp,
+        eventlocation      varchar(100),
+        eventcapacity      int,
+        eventregistrationdeadline timestamp
+    );
+
+    create table participantattendanceinstances (
+        attendanceinstanceid      serial primary key,
+        participantid             int references participantinfo(participantid),
+        instanceid                int references eventinstances(instanceid),
+        eventdatetimestart        date,
+        registrationstatus        varchar(20),
+        registrationattendedflag  boolean,
+        registrationcheckintime   timestamp,
+        registrationcreateddate   timestamp
+    );
+
+    create table surveyinstances (
+        attendanceinstanceid      int primary key references participantattendanceinstances(attendanceinstanceid),
+        surveysatisfactionscore   numeric(3,1),
+        surveyusefulnesscore      numeric(3,1),
+        surveyinstructorscore     numeric(3,1),
+        surveyrecommendationscore numeric(3,1),
+        surveyoverallscore        numeric(3,1),
+        surveynpsbucket           varchar(20) check (surveynpsbucket in ('Passive','Promoter','Detractor')),
+        surveycomments            varchar(700),
+        surveysubmissiondate      timestamp
+    );
+
+    -- staging table
+
+    create table stagingrawsurvey (
+        rowid serial primary key,
+
+        participantemail text,
+        participantfirstname text,
+        participantlastname text,
+        participantdob text,
+        participantrole text,
+        participantphone text,
+        participantcity text,
+        participantstate text,
+        participantzip text,
+        participantschooloremployer text,
+        participantfieldofinterest text,
+
+        eventname text,
+        eventtype text,
+        eventdescription text,
+        eventrecurrencepattern text,
+        eventdefaultcapacity text,
+
+        eventdatetimestart text,
+        eventdatetimeend text,
+        eventlocation text,
+        eventcapacity text,
+        eventregistrationdeadline text,
+
+        registrationstatus text,
+        registrationattendedflag text,
+        registrationcheckintime text,
+        registrationcreatedat text,
+
+        surveysatisfactionscore text,
+        surveyusefulnessscore text,
+        surveyinstructorscore text,
+        surveyrecommendationscore text,
+        surveyoverallscore text,
+        surveynpsbucket text,
+        surveycomments text,
+        surveysubmissiondate text,
+
+        milestonetitles text,
+        milestonedates text,
+
+        donationhistory text,
+        totaldonations text
+    );
+
+    -- archive staging table
+
+    create table stagingarchive (
+        archiveid serial primary key,
+        archivedat timestamp not null default now(),
+
+        participantemail text,
+        participantfirstname text,
+        participantlastname text,
+        participantdob text,
+        participantrole text,
+        participantphone text,
+        participantcity text,
+        participantstate text,
+        participantzip text,
+        participantschooloremployer text,
+        participantfieldofinterest text,
+
+        eventname text,
+        eventtype text,
+        eventdescription text,
+        eventrecurrencepattern text,
+        eventdefaultcapacity text,
+
+        eventdatetimestart text,
+        eventdatetimeend text,
+        eventlocation text,
+        eventcapacity text,
+        eventregistrationdeadline text,
+
+        registrationstatus text,
+        registrationattendedflag text,
+        registrationcheckintime text,
+        registrationcreatedat text,
+
+        surveysatisfactionscore text,
+        surveyusefulnessscore text,
+        surveyinstructorscore text,
+        surveyrecommendationscore text,
+        surveyoverallscore text,
+        surveynpsbucket text,
+        surveycomments text,
+        surveysubmissiondate text,
+
+        milestonetitles text,
+        milestonedates text,
+
+        donationhistory text,
+        totaldonations text,
+
+        originalrowid integer
+    );  
+
+ETL (Extract, Transform, Load) pipeline flow:
+
+    Here are the all column headers in the csv file upload:
+    ParticipantEmail,ParticipantFirstName,ParticipantLastName,ParticipantDOB,ParticipantRole,ParticipantPhone,ParticipantCity,ParticipantState,ParticipantZip,ParticipantSchoolOrEmployer,ParticipantFieldOfInterest,EventName,EventType,EventDescription,EventRecurrencePattern,EventDefaultCapacity,EventDateTimeStart,EventDateTimeEnd,EventLocation,EventCapacity,EventRegistrationDeadline,RegistrationStatus,RegistrationAttendedFlag,RegistrationCheckInTime,RegistrationCreatedAt,SurveySatisfactionScore,SurveyUsefulnessScore,SurveyInstructorScore,SurveyRecommendationScore,SurveyOverallScore,SurveyNPSBucket,SurveyComments,SurveySubmissionDate,MilestoneTitles,MilestoneDates,DonationHistory,TotalDonations
+
+
+    NORMALIZATION PIPELINE — COMPLETE INSTRUCTIONS
+    ==============================================
+
+    Goal:
+    -----
+    Convert raw CSV event/survey data into a clean relational structure
+    consisting of:
+
+    participantinfo
+    participantdonations
+    participantmilestones
+    eventtypes
+    eventinstances
+    participantattendanceinstances
+    surveyinstances
+
+    using a staging table as an intermediate step.
+
+
+    ------------------------------------------------------------
+    1. UPLOADING RAW CSV INTO STAGING TABLE
+    ------------------------------------------------------------
+
+    Step 1.1 — User uploads a CSV file through the web interface.
+    Step 1.2 — The Express route receives the uploaded file (via Multer).
+    Step 1.3 — Node.js reads the CSV using "csv-parser".
+    Step 1.4 — For each row in the CSV, insert the raw fields into:
+
+        stagingrawsurvey(…all TEXT columns…)
+
+    Notes:
+    - Do NOT transform or validate anything at this stage.
+    - Treat all values as untrusted raw text.
+    - Insert blank, malformed, and inconsistent values unchanged.
+    - This ensures ingestion never fails due to data quality issues.
+
+    After upload:
+        stagingrawsurvey contains one row per CSV entry.
+
+
+    ------------------------------------------------------------
+    2. NORMALIZATION WORKFLOW OVERVIEW
+    ------------------------------------------------------------
+
+    For each row in stagingrawsurvey:
+
+    1. Normalize participant → participantinfo
+    2. Normalize event type → eventtypes
+    3. Normalize event instance → eventinstances
+    4. Normalize attendance → participantattendanceinstances
+    5. Normalize survey → surveyinstances
+    6. Normalize milestones → participantmilestones
+    7. Normalize donations → participantdonations
+
+    Normalization order matters, because later tables depend on IDs from earlier tables.
+
+
+    ------------------------------------------------------------
+    3. NORMALIZATION RULES AND TRANSFORMATIONS
+    ------------------------------------------------------------
+
+    Below are the exact rules used to normalize each category of data.
+
+
+    ============================================================
+    3.1 PARTICIPANT NORMALIZATION
+    ============================================================
+
+    Column headers in the csv file upload:
+    ParticipantEmail,ParticipantFirstName,ParticipantLastName,ParticipantDOB,ParticipantRole,ParticipantPhone,ParticipantCity,ParticipantState,ParticipantZip,ParticipantSchoolOrEmployer,ParticipantFieldOfInterest
+
+    Source columns from staging table:
+    participantemail
+    participantfirstname
+    participantlastname
+    participantdob
+    participantrole
+    participantphone
+    participantcity
+    participantstate
+    participantzip
+    participantschooloremployer
+    participantfieldofinterest
+
+    Column headers in the participantinfo table:
+    participantid
+    participantemail
+    participantfirstname
+    participantlastname
+    participantdob
+    participantrole
+    participantphone
+    participantcity
+    participantstate
+    participantzip
+    participantschooloremployer
+    participantfieldofinterest
+
+    Transformations:
+    - If fields are blank, NULL.
+    - Trim whitespace for all fields.
+    - Convert participantdob from text → DATE
+        It will start in this format: YYYY-MM-DD HH:MM:SS
+        It will end in this format: YYYY-MM-DD
+    - Strip non-digit characters from phone numbers (including +, (, ), -, (space))
+
+    Deduplication:
+    - Treat "participantemail" as the natural unique key.
+    - If a participant with the same email already exists,
+        reuse their participantid.
+    - Otherwise, insert a new record.
+
+    Output:
+    participantId = inserted or existing participantinfo.participantid
+
+
+    ============================================================
+    3.2 EVENT TYPE NORMALIZATION
+    ============================================================
+    Column headers in the csv file upload:
+    EventName,EventType,EventDescription,EventRecurrencePattern,EventDefaultCapacity
+
+    Source columns from staging table:
+    eventname
+    eventtype
+    eventdescription
+    eventrecurrencepattern
+    eventdefaultcapacity
+
+    Column headers in the eventtypes table:
+    eventtypeid
+    eventname
+    eventtype
+    eventdescription
+    eventrecurrencepattern
+    eventdefaultcapacity
+
+    Transformations:
+    - If fields are blank, NULL.
+    - Convert eventdefaultcapacity to integer if present.
+
+    Deduplication:
+    - eventname is the primary key of eventtypes.
+    - if an eventtypes row already exists with the same eventname:
+        → return the existing eventname
+        → do not update or modify the existing row
+    - otherwise:
+        → insert a new eventtypes row
+
+
+    ============================================================
+    3.3 EVENT INSTANCE NORMALIZATION
+    ============================================================
+
+    Column headers in the csv file upload:
+    EventName,EventDateTimeStart,EventDateTimeEnd,EventLocation,EventCapacity,EventRegistrationDeadline
+
+    Source columns from staging table:
+    eventname
+    eventdatetimestart
+    eventdatetimeend
+    eventlocation
+    eventcapacity
+    eventregistrationdeadline
+
+    Column headers in the eventinstances table:
+    eventinstanceid
+    eventname
+    eventdatetimestart
+    eventdatetimeend
+    eventlocation
+    eventcapacity
+    eventregistrationdeadline
+
+    Transformations:
+    - If fields are blank, NULL.
+    - Convert all datetime text fields → TIMESTAMP (if valid; else NULL).
+        eventdatetimestart will start in this format as TEXT: YYYY-MM-DD HH:MM:SS
+        eventdatetimeend will start in this format as TEXT: YYYY-MM-DD HH:MM:SS
+        eventregistrationdeadline will start in this format as TEXT: YYYY-MM-DD HH:MM:SS
+    - Convert eventcapacity → integer.
+
+    Uniqueness rule:
+    - eventinstances are considered unique based on:
+            (eventname, eventdatetimestart)
+        because a recurring event is represented by multiple instances.
+
+    Deduplication:
+    - Treat (eventname, eventdatetimestart) as the natural unique key
+    for eventinstances.
+    - If an instance already exists with the same eventname and
+    eventdatetimestart:
+        → Reuse its instanceid (do not insert a new row).
+    - Otherwise:
+        → Insert a new eventinstances record.
+
+    Output:
+    instanceId = eventinstances.instanceid
+
+
+    ============================================================
+    3.4 ATTENDANCE NORMALIZATION
+    ============================================================
+
+    Column headers in the csv file upload:
+    RegistrationStatus,RegistrationAttendedFlag,RegistrationCheckInTime,RegistrationCreatedAt,EventDateTimeStart
+
+    Source columns from staging table:
+    registrationstatus
+    registrationattendedflag
+    registrationcheckintime
+    registrationcreatedat
+    eventdatetimestart
+
+    Column headers in the participantattendanceinstances table:
+    attendanceinstanceid
+    participantid
+    instanceid
+    registrationstatus
+    registrationattendedflag
+    registrationcheckintime
+    registrationcreateddate
+
+    Transformations:
+    - If fields are blank, NULL.
+    - Convert booleans:
+            "TRUE", "true", "1", "yes" → TRUE
+            "FALSE", "false", "0", "no" → FALSE
+    - Convert datetime text fields → TIMESTAMP when valid.
+        registrationcheckintime will start in this format as TEXT: YYYY-MM-DD HH:MM:SS
+        registrationcreatedat will start in this format as TEXT: YYYY-MM-DD HH:MM:SS
+    Uniqueness rule:
+    - One attendance row per (participantid, instanceid).
+
+    Deduplication:
+    - If attendance already exists for this participant and event instance,
+        reuse that attendanceinstanceid.
+    - Otherwise, insert a new attendance record.
+
+    Output:
+    attendanceId = participantattendanceinstances.attendanceinstanceid
+
+
+    ============================================================
+    3.5 SURVEY NORMALIZATION
+    ============================================================
+
+    Column headers in the csv file upload:
+    SurveySatisfactionScore,SurveyUsefulnessScore,SurveyInstructorScore,SurveyRecommendationScore,SurveyOverallScore,SurveyNPSBucket,SurveyComments,SurveySubmissionDate
+
+    Source columns from staging table:
+    surveysatisfactionscore
+    surveyusefulnessscore
+    surveyinstructorscore
+    surveyrecommendationscore
+    surveyoverallscore
+    surveynpsbucket
+    surveycomments
+    surveysubmissiondate
+
+    Column headers in the surveyinstances table:
+    surveyinstanceid
+    attendanceinstanceid
+    surveynpsbucket
+    surveycomments
+    surveysubmissiondate
+
+    Transformations:
+    - If fields are blank, NULL.
+    - Convert numeric fields → float (NULL if invalid or missing).
+    - Clean npsbucket:
+            Valid: "Promoter", "Passive", "Detractor"
+            Normalize any inconsistent capitalizations.
+    - Turn comments into VARCHAR(700).
+    - Convert surveysubmissiondate → TIMESTAMP.
+        It will start in this format as TEXT: YYYY-MM-DD HH:MM:SS
+
+    Deduplication:
+    - A survey is uniquely tied to an attendanceinstanceid.
+    - If a surveyinstances record already exists for this attendanceinstanceid:
+        → Do NOT insert a new row. Instead just skip.
+    - Otherwise:
+        → Insert a new surveyinstances row.
+
+    Insert:
+    - Only insert if at least one survey field is not empty.
+
+
+    ============================================================
+    3.6 MILESTONE NORMALIZATION
+    ============================================================
+
+    Column headers in the csv file upload:
+    MilestoneTitles,MilestoneDates
+
+    Source columns from staging table:
+    - milestonetitles  (e.g., "High School Diploma; Published Project")
+    - milestonedates   (e.g., "2025-05-02; 2022-11-13")
+
+    Column headers in the participantmilestones table:
+    participantmilestoneid
+    participantid
+    milestonetitle
+    milestonedate
+
+    Process:
+    - If both milestonetitles and milestonedates are empty → no milestones.
+    - Split milestonetitles on ";" to get an array of title strings.
+    - Split milestonedates on ";" to get an array of date strings.
+    - Trim each entry in each array.
+    - Convert each date → DATE (NULL if invalid or missing).
+    - Pair titles with dates by index:
+        For i from 0 to maxIndex:
+            title = titles[i] (or NULL)
+            date = dates[i]  (or NULL)
+
+    Deduplication (IMPORTANT):
+    - Milestones often arrive as a *full cumulative history* each time.
+    - To prevent inserting the same milestones repeatedly, treat the pair:
+            (participantid, milestoneTitle, milestoneDate)
+    as the natural unique key.
+    - Before inserting each milestone:
+        → Check if a milestone already exists for the participant
+            with the same title and the same date.
+        → If it exists → skip (do NOT insert again).
+        → If it does NOT exist → insert a new milestone.
+
+    MilestoneNo:
+    - milestoneno represents the order of milestones for each participant.
+    - After inserting any new milestones:
+        1. Retrieve the participant's full milestone list.
+        2. Sort by milestonedate ascending (NULLs last).
+        3. Assign milestoneno sequentially from 1…N.
+    - This ensures milestoneno always reflects the full lifetime history
+    without duplicates or gaps.
+
+
+    ============================================================
+    3.7 DONATION NORMALIZATION
+    ============================================================
+
+    Column headers in the csv file upload:
+    DonationHistory,TotalDonations
+
+    Source columns from staging table:
+    - donationhistory   (e.g., "2023-07-21:$50.71; 2023-04-18:$23.27")
+    (totaldonations is ignored — always calculated, never stored)
+
+    Column headers in the participantdonations table:
+    donationid
+    participantid
+    donationdate
+    donationamount
+
+    Process:
+    - If donationhistory is empty or NULL → no donation rows.
+    - Split donationhistory on ";" to obtain individual donation entries.
+    - Each entry is expected in the form "DATE:$Amount".
+    - Split each entry on ":" to extract the date and amount components.
+    - Convert DATE → DATE type (store NULL if invalid or placeholder like "UNKNOWN_DATE").
+    - Convert amount → NUMERIC(10,2).
+
+    Deduplication:
+    - Donations may appear multiple times across different CSV uploads.
+    - To avoid double-counting historical donations, treat:
+        (participantid, donationdate, donationamount)
+    as the natural unique key.
+    - Before inserting a donation row:
+        → Check if a record with the same participantid,
+            donationdate, and donationamount already exists.
+        → If it exists → skip insertion.
+        → If it does NOT exist → insert a new donation row.
+
+    donationno:
+    - donationno represents the sequential number of each participant’s
+    donations across their entire history.
+    - After inserting any new (deduplicated) donations:
+        1. Retrieve all donations for that participant.
+        2. Sort them by donationdate ascending
+            (NULL dates sorted last).
+        3. Reassign donationno sequentially from 1…N.
+    - This ensures donationno always reflects a participant’s
+    complete lifetime donation history, without gaps or duplicates.
+
+
+    ------------------------------------------------------------
+    4. ERROR HANDLING RULES
+    ------------------------------------------------------------
+
+    Parsing Rules:
+    - If any individual field fails to parse (date, number, boolean),
+        → store NULL in the normalized table.
+    - Do NOT reject the row; continue processing.
+    - Log parsing errors to console or file.
+
+    Required Fields for Normalization:
+    - participantemail missing → skip the entire row.
+    - eventname missing → skip eventtypes, eventinstances, attendance, and survey steps.
+    - eventdatetimestart missing → skip eventinstances, attendance, and survey steps.
+    - If attendance cannot be created → skip survey creation.
+    - If both milestonetitles AND milestonedates are empty → skip milestones.
+    - If donationhistory is empty → skip donations.
+
+    General Rule:
+    - Only insert into a normalized table when the fields required to
+    construct that table’s natural key are present.
+    - Missing non-essential fields should be stored as NULL.
+
+
+    ------------------------------------------------------------
+    5. POST-PROCESS
+    ------------------------------------------------------------
+
+    After all rows have been normalized:
+
+    1. Archive the raw staging rows:
+
+        insert into stagingarchive (
+            originalrowid,
+            participantemail,
+            participantfirstname,
+            participantlastname,
+            participantdob,
+            participantrole,
+            participantphone,
+            participantcity,
+            participantstate,
+            participantzip,
+            participantschooloremployer,
+            participantfieldofinterest,
+            eventname,
+            eventtype,
+            eventdescription,
+            eventrecurrencepattern,
+            eventdefaultcapacity,
+            eventdatetimestart,
+            eventdatetimeend,
+            eventlocation,
+            eventcapacity,
+            eventregistrationdeadline,
+            registrationstatus,
+            registrationattendedflag,
+            registrationcheckintime,
+            registrationcreatedat,
+            surveysatisfactionscore,
+            surveyusefulnessscore,
+            surveyinstructorscore,
+            surveyrecommendationscore,
+            surveyoverallscore,
+            surveynpsbucket,
+            surveycomments,
+            surveysubmissiondate,
+            milestonetitles,
+            milestonedates,
+            donationhistory,
+            totaldonations
+        )
+        select
+            rowid as originalrowid,
+            participantemail,
+            participantfirstname,
+            participantlastname,
+            participantdob,
+            participantrole,
+            participantphone,
+            participantcity,
+            participantstate,
+            participantzip,
+            participantschooloremployer,
+            participantfieldofinterest,
+            eventname,
+            eventtype,
+            eventdescription,
+            eventrecurrencepattern,
+            eventdefaultcapacity,
+            eventdatetimestart,
+            eventdatetimeend,
+            eventlocation,
+            eventcapacity,
+            eventregistrationdeadline,
+            registrationstatus,
+            registrationattendedflag,
+            registrationcheckintime,
+            registrationcreatedat,
+            surveysatisfactionscore,
+            surveyusefulnessscore,
+            surveyinstructorscore,
+            surveyrecommendationscore,
+            surveyoverallscore,
+            surveynpsbucket,
+            surveycomments,
+            surveysubmissiondate,
+            milestonetitles,
+            milestonedates,
+            donationhistory,
+            totaldonations
+        from stagingrawsurvey;
+
+    2. Clear the staging table to prevent reprocessing:
+
+    TRUNCATE stagingrawsurvey;
+
+    This preserves a complete audit trail of raw uploaded data while
+    ensuring that staging remains empty for the next upload.
+
+
+    ------------------------------------------------------------
+    END OF NORMALIZATION INSTRUCTIONS
+    ------------------------------------------------------------
